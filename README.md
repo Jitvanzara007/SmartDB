@@ -1,130 +1,31 @@
 # Smart_DB: Training Platform
 
-A full-stack training platform with instructor and trainee roles, built with Django (backend) and React (frontend).
+A full-stack training platform for instructors and trainees, built with Django (backend) and React (frontend).
 
 ---
 
-## Features
-- Instructor and trainee dashboards
-- Profile management
-- Training modules and trainee management
-- Messaging system between trainees and instructors
-- Modern, dark-themed UI
+## Quick Setup
 
----
-
-## Project Structure
-
-```
-Smart_DB/
-  ├── accounts/           # Django app for user accounts
-  ├── client/             # React frontend
-  ├── training/           # Django app for training modules, messaging, etc.
-  ├── smart_db/           # Django project settings
-  ├── db.sqlite3          # Default SQLite database (can use PostgreSQL)
-  ├── manage.py           # Django management script
-  ├── requirements.txt    # Python dependencies
-  └── README.md           # This file
-```
-
----
-
-## Local Setup
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/your-username/Smart_DB.git
-cd Smart_DB
-```
-
-### 2. Backend (Django)
-
-#### a. Create a virtual environment and activate it:
-
-```bash
-python -m venv venv
-# On Windows:
-venv\Scripts\activate
-# On Mac/Linux:
-source venv/bin/activate
-```
-
-#### b. Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-#### c. Run migrations and create a superuser:
-
-```bash
-python manage.py migrate
-python manage.py createsuperuser
-```
-
-#### d. (Optional) Load sample data:
-
-```bash
-python manage.py create_sample_data
-```
-
-#### e. Start the backend server:
-
-```bash
-python manage.py runserver
-```
-
-The backend will run at `http://127.0.0.1:8000/`
-
----
-
-### 3. Frontend (React)
-
-```bash
-cd client
-npm install
-npm run dev
-```
-
-The frontend will run at `http://localhost:5173/`
-
----
-
-## Deployment
-
-### Deploying to GitHub
-1. Initialize a git repository (if not already):
+1. **Clone:**
    ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
+   git clone https://github.com/your-username/Smart_DB.git
+   cd Smart_DB
    ```
-2. Create a new repository on GitHub (https://github.com/new).
-3. Add the remote and push:
+2. **Backend:**
    ```bash
-   git remote add origin https://github.com/your-username/Smart_DB.git
-   git branch -M main
-   git push -u origin main
+   python -m venv venv
+   venv\Scripts\activate  # On Windows
+   # or: source venv/bin/activate  # On Mac/Linux
+   pip install -r requirements.txt
+   python manage.py migrate
+   python manage.py runserver
    ```
-
-### Deploying to Production
-- **Backend:** Use [PostgreSQL](https://www.postgresql.org/) for production. Update `DATABASES` in `smart_db/settings.py`.
-- **Frontend:** Build with `npm run build` and serve with a production server (e.g., Nginx, Vercel, Netlify).
-- **Environment Variables:** Set `DEBUG = False` and configure allowed hosts in Django settings.
-
----
-
-## Notes
-- For MongoDB, see [Djongo](https://www.djongoproject.com/) (not recommended for production).
-- For more details, see the `client/README.md` for frontend-specific info.
-
----
-
-## License
-MIT
-
-## Tech Stack
+3. **Frontend:**
+   ```bash
+   cd client
+   npm install
+   npm run dev
+   ```
 
 ### Backend
 - **Django 4.2.7** - Web framework
