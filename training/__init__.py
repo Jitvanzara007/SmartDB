@@ -1,0 +1,1 @@
+# Training app for managing modules and assignments 
