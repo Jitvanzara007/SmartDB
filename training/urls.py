@@ -25,7 +25,7 @@ urlpatterns = [
     
     # Module Assignments
     path('assignments/', ModuleAssignmentListCreateView.as_view(), name='assignment-list-create'),
-    path('assignments/<int:pk>/', ModuleAssignmentDetailView.as_view(), name='assignment-detail'),
+    path('assignments/<str:pk>/', ModuleAssignmentDetailView.as_view(), name='assignment-detail'),
     
     # Dashboards
     path('dashboard/trainee/', TraineeDashboardView.as_view(), name='trainee-dashboard'),
@@ -34,22 +34,22 @@ urlpatterns = [
     
     # Trainee-specific
     path('trainee/modules/', TraineeModuleListView.as_view(), name='trainee-modules'),
-    path('trainee/complete/<int:assignment_id>/', MarkModuleCompletedView.as_view(), name='mark-completed'),
+    path('trainee/complete/<str:assignment_id>/', MarkModuleCompletedView.as_view(), name='mark-completed'),
     
     # Instructor-specific
     path('trainees/', TraineeListView.as_view(), name='trainee-list'),
     path('trainees/<str:trainee_id>/delete/', TraineeDeleteView.as_view(), name='trainee-delete'),
-    path('instructor/trainees/<int:trainee_id>/progress/', TraineeProgressView.as_view(), name='trainee-progress'),
+    path('instructor/trainees/<str:trainee_id>/progress/', TraineeProgressView.as_view(), name='trainee-progress'),
 
     path('modules/<str:module_id>/assign/', BulkAssignModuleView.as_view(), name='bulk-assign-module'),
 
     path('messages/send/', MessageInstructorView.as_view(), name='message-instructor'),
     path('messages/inbox/', InstructorMessagesView.as_view(), name='instructor-messages'),
-    path('messages/<int:message_id>/reply/', InstructorReplyView.as_view(), name='instructor-reply'),
+    path('messages/<str:message_id>/reply/', InstructorReplyView.as_view(), name='instructor-reply'),
     path('messages/my/', TraineeMessagesView.as_view(), name='trainee-messages'),
 
     path('superadmin/users/', UserListView.as_view(), name='superadmin-user-list'),
     path('superadmin/users/create/', UserCreateView.as_view(), name='superadmin-user-create'),
-    path('superadmin/users/<int:user_id>/edit/', UserUpdateView.as_view(), name='superadmin-user-edit'),
-    path('superadmin/users/<int:user_id>/delete/', UserDeleteView.as_view(), name='superadmin-user-delete'),
+    path('superadmin/users/<str:user_id>/edit/', UserUpdateView.as_view(), name='superadmin-user-edit'),
+    path('superadmin/users/<str:user_id>/delete/', UserDeleteView.as_view(), name='superadmin-user-delete'),
 ] 
