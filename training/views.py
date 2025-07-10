@@ -2,10 +2,10 @@ from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth import authenticate
+import jwt
+from django.conf import settings
+from datetime import datetime, timedelta
 from django.db.models import Count, Q
-from django.utils import timezone
 from .models import User, TrainingModule, ModuleAssignment, Message
 from .serializers import (
     UserSerializer, UserCreateSerializer, UserUpdateSerializer,
@@ -24,7 +24,23 @@ class IsTrainee(permissions.BasePermission):
     def has_permission(self, request, view):
         return request.user.role == 'trainee'
 
-# Authentication Views
+class IsSuperAdmin(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return request.user.role == 'superadmin'
+
+# Helper function to generate JWT tokens
+
+def generate_jwt(user):
+    payload = {
+        'user_id': str(user.id),
+        'username': user.username,
+        'role': user.role,
+        'exp': datetime.utcnow() + timedelta(hours=1),
+        'iat': datetime.utcnow(),
+    }
+    token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+    return token
+
 class RegisterView(APIView):
     permission_classes = [permissions.AllowAny]
     
@@ -32,11 +48,26 @@ class RegisterView(APIView):
         serializer = UserCreateSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            refresh = RefreshToken.for_user(user)
+            access = generate_jwt(user)
+
+            # Assign 6 initial modules (3 completed, 3 incomplete)
+            from training.models import TrainingModule, ModuleAssignment
+            from datetime import datetime
+            modules = TrainingModule.objects.order_by('id')[:6]
+            for i, module in enumerate(modules):
+                assignment = ModuleAssignment(
+                    trainee=user,
+                    module=module,
+                    assigned_by=None,
+                    is_completed=i < 3,
+                    assigned_at=datetime.utcnow(),
+                    completed_at=datetime.utcnow() if i < 3 else None
+                )
+                assignment.save()
+
             return Response({
                 'user': UserSerializer(user).data,
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
+                'access': access,
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -47,11 +78,10 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validated_data['user']
-            refresh = RefreshToken.for_user(user)
+            access = generate_jwt(user)
             return Response({
                 'user': UserSerializer(user).data,
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
+                'access': access,
             })
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -67,15 +97,51 @@ class LogoutView(APIView):
 
 # User Management Views
 class UserProfileView(APIView):
+    permission_classes = [permissions.AllowAny]
     def get(self, request):
-        serializer = UserSerializer(request.user)
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+
+        user = User.objects(id=payload['user_id']).first()
+        if not user:
+            return Response({'error': 'User not found'}, status=404)
+
+        serializer = UserSerializer(user)
         return Response(serializer.data)
     
     def put(self, request):
-        serializer = UserUpdateSerializer(request.user, data=request.data, partial=True)
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+
+        user = User.objects(id=payload['user_id']).first()
+        if not user:
+            return Response({'error': 'User not found'}, status=404)
+
+        serializer = UserUpdateSerializer(user, data=request.data, partial=True)
         if serializer.is_valid():
-            serializer.save()
-            return Response(UserSerializer(request.user).data)
+            # Update fields manually for MongoEngine
+            for attr, value in serializer.validated_data.items():
+                setattr(user, attr, value)
+            user.save()
+            return Response(UserSerializer(user).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class ChangePasswordView(APIView):
@@ -91,41 +157,192 @@ class ChangePasswordView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # Training Module Views
-class TrainingModuleListCreateView(generics.ListCreateAPIView):
-    serializer_class = TrainingModuleSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get_queryset(self):
-        if self.request.user.role == 'instructor':
-            return TrainingModule.objects.filter(is_active=True)
-        return TrainingModule.objects.none()
-    
-    def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+class TrainingModuleListCreateView(APIView):
+    permission_classes = [permissions.AllowAny]  # JWT-based
 
-class TrainingModuleDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = TrainingModule.objects.all()
-    serializer_class = TrainingModuleSerializer
-    permission_classes = [permissions.IsAuthenticated, IsInstructor]
+    def get(self, request):
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+
+        modules = TrainingModule.objects(is_active=True)
+        serializer = TrainingModuleSerializer(modules, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+
+        serializer = TrainingModuleSerializer(data=request.data)
+        if serializer.is_valid():
+            module = TrainingModule(**serializer.validated_data)
+            module.created_by = user
+            module.save()
+            return Response(TrainingModuleSerializer(module).data, status=201)
+        return Response(serializer.errors, status=400)
+
+class TrainingModuleDetailView(APIView):
+    permission_classes = [permissions.AllowAny]  # JWT-based
+
+    def get(self, request, pk):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+        module = TrainingModule.objects(id=pk).first()
+        if not module:
+            return Response({'error': 'Module not found'}, status=404)
+        serializer = TrainingModuleSerializer(module)
+        return Response(serializer.data)
+
+    def put(self, request, pk):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+        module = TrainingModule.objects(id=pk).first()
+        if not module:
+            return Response({'error': 'Module not found'}, status=404)
+        data = request.data
+        module.title = data.get('title', module.title)
+        module.description = data.get('description', module.description)
+        module.content = data.get('content', module.content)
+        module.duration_minutes = data.get('duration_minutes', module.duration_minutes)
+        module.is_active = data.get('is_active', module.is_active)
+        module.updated_at = datetime.utcnow()
+        module.save()
+        serializer = TrainingModuleSerializer(module)
+        return Response(serializer.data)
+
+    def delete(self, request, pk):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+        module = TrainingModule.objects(id=pk).first()
+        if not module:
+            return Response({'error': 'Module not found'}, status=404)
+        module.delete()
+        return Response({'message': 'Module deleted successfully.'}, status=204)
 
 # Module Assignment Views
-class ModuleAssignmentListCreateView(generics.ListCreateAPIView):
-    serializer_class = ModuleAssignmentSerializer
-    permission_classes = [permissions.IsAuthenticated, IsInstructor]
-    
-    def get_queryset(self):
-        print("ModuleAssignmentListCreateView.get_queryset called")
-        queryset = ModuleAssignment.objects.all()
-        module_id = self.request.query_params.get('module_id')
-        print(f"Module ID from query params: {module_id}")
+class ModuleAssignmentListCreateView(APIView):
+    permission_classes = [permissions.AllowAny]  # JWT-based
+
+    def get(self, request):
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+
+        module_id = request.query_params.get('module_id')
+        trainee_id = request.query_params.get('trainee_id')
+        queryset = ModuleAssignment.objects
         if module_id:
-            queryset = queryset.filter(module_id=module_id)
-        print(f"Returning {queryset.count()} assignments")
-        return queryset
-    
-    def perform_create(self, serializer):
-        print(f"Creating assignment: {serializer.validated_data}")
-        serializer.save(assigned_by=self.request.user)
+            queryset = queryset(module=module_id)
+        if trainee_id:
+            queryset = queryset(trainee=trainee_id)
+        assignments = list(queryset)
+        serializer = ModuleAssignmentSerializer(assignments, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+
+        data = request.data
+        trainee_id = data.get('trainee_id')
+        module_id = data.get('module_id')
+        if not trainee_id or not module_id:
+            return Response({'error': 'trainee_id and module_id are required'}, status=400)
+        trainee = User.objects(id=trainee_id).first()
+        module = TrainingModule.objects(id=module_id).first()
+        if not trainee or not module:
+            return Response({'error': 'Trainee or Module not found'}, status=404)
+        assignment = ModuleAssignment(
+            trainee=trainee,
+            module=module,
+            assigned_by=user,
+            is_completed=False,
+            assigned_at=datetime.utcnow()
+        )
+        assignment.save()
+        serializer = ModuleAssignmentSerializer(assignment)
+        return Response(serializer.data, status=201)
 
 class ModuleAssignmentDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = ModuleAssignment.objects.all()
@@ -134,48 +351,78 @@ class ModuleAssignmentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 # Dashboard Views
 class TraineeDashboardView(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsTrainee]
+    permission_classes = [permissions.AllowAny]  # JWT-based, so no DRF auth
     
     def get(self, request):
-        user = request.user
-        assignments = ModuleAssignment.objects.filter(trainee=user)
-        
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+
+        user = User.objects(id=payload['user_id']).first()
+        if not user:
+            return Response({'error': 'User not found'}, status=404)
+
+        assignments = ModuleAssignment.objects(trainee=user)
         total_assigned = assignments.count()
         completed = assignments.filter(is_completed=True).count()
         pending = total_assigned - completed
         completion_percentage = (completed / total_assigned * 100) if total_assigned > 0 else 0
-        
+
         progress = {
             'total_assigned': total_assigned,
             'completed': completed,
             'pending': pending,
             'completion_percentage': round(completion_percentage, 2)
         }
-        
+
         assigned_modules = []
         for assignment in assignments:
             assigned_modules.append({
-                'id': assignment.id,
+                'id': str(assignment.id),
                 'module': TrainingModuleSerializer(assignment.module).data,
                 'is_completed': assignment.is_completed,
                 'assigned_at': assignment.assigned_at,
                 'completed_at': assignment.completed_at
             })
-        
+
         dashboard_data = {
             'user': UserSerializer(user).data,
             'progress': progress,
             'assigned_modules': assigned_modules
         }
-        
+
         serializer = TraineeDashboardSerializer(dashboard_data)
         return Response(serializer.data)
 
 class InstructorDashboardView(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsInstructor]
-    
+    permission_classes = [permissions.AllowAny]  # JWT-based
+
     def get(self, request):
-        trainees = User.objects.filter(role='trainee', is_active=True)
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+
+        trainees = User.objects(role='trainee', is_active=True)
         modules = TrainingModule.objects.all()
         assignments = ModuleAssignment.objects.all()
 
@@ -193,7 +440,7 @@ class InstructorDashboardView(APIView):
             else:
                 unassigned_modules_count += 1
             module_stats.append({
-                'id': module.id,
+                'id': str(module.id),
                 'title': module.title,
                 'assigned_count': assigned_count,
                 'completed_count': completed_count,
@@ -221,15 +468,17 @@ class InstructorDashboardView(APIView):
                 bucket = 0
             progress_buckets[bucket] += 1
             trainee_stats.append({
-                'id': trainee.id,
+                'id': str(trainee.id),
                 'username': trainee.username,
+                'email': trainee.email,
+                'created_at': trainee.created_at.isoformat() if trainee.created_at else None,
                 'completion_percentage': completion_percentage,
             })
 
         # Assignment status summary
         total_assignments = assignments.count()
         completed_assignments = assignments.filter(is_completed=True).count()
-        in_progress_assignments = assignments.filter(is_completed=False).exclude(completed_at=None).count()
+        in_progress_assignments = assignments.filter(is_completed=False, completed_at__ne=None).count()
         not_started_assignments = assignments.filter(is_completed=False, completed_at=None).count()
         assignment_status_summary = {
             'completed': completed_assignments,
@@ -252,10 +501,26 @@ class InstructorDashboardView(APIView):
 
 # Trainee-specific Views
 class TraineeModuleListView(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsTrainee]
-    
+    permission_classes = [permissions.AllowAny]  # JWT-based
+
     def get(self, request):
-        assignments = ModuleAssignment.objects.filter(trainee=request.user)
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+
+        user = User.objects(id=payload['user_id']).first()
+        if not user:
+            return Response({'error': 'User not found'}, status=404)
+
+        assignments = ModuleAssignment.objects(trainee=user)
         serializer = ModuleAssignmentSerializer(assignments, many=True)
         return Response(serializer.data)
 
@@ -279,15 +544,27 @@ class MarkModuleCompletedView(APIView):
 
 # Instructor-specific Views
 class TraineeListView(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsInstructor]
-    
+    permission_classes = [permissions.AllowAny]  # JWT-based
+
     def get(self, request):
-        print("TraineeListView called")
-        print(f"User: {request.user.username}, Role: {request.user.role}")
-        trainees = User.objects.filter(role='trainee', is_active=True)
-        print(f"Found {trainees.count()} trainees")
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+
+        trainees = User.objects(role='trainee', is_active=True)
         serializer = UserSerializer(trainees, many=True)
-        print(f"Serialized data: {serializer.data}")
         return Response(serializer.data)
 
 class TraineeProgressView(APIView):
@@ -320,100 +597,150 @@ class TraineeProgressView(APIView):
             )
 
 class BulkAssignModuleView(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsInstructor]
+    permission_classes = [permissions.AllowAny]  # JWT-based
 
     def post(self, request, module_id):
-        print(f"BulkAssignModuleView called with module_id: {module_id}")
-        print(f"Request data: {request.data}")
-        print(f"User: {request.user.username}, Role: {request.user.role}")
-        print(f"Request headers: {request.headers}")
-        
-        # Check if user is instructor
-        if request.user.role != 'instructor':
-            print(f"Permission denied: user role is {request.user.role}")
-            return Response({'error': 'Only instructors can assign modules'}, status=status.HTTP_403_FORBIDDEN)
-        
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+
         trainee_ids = request.data.get('trainee_ids', [])
         if not isinstance(trainee_ids, list):
-            return Response({'error': 'trainee_ids must be a list'}, status=status.HTTP_400_BAD_REQUEST)
-        
+            return Response({'error': 'trainee_ids must be a list'}, status=400)
         if not trainee_ids:
-            return Response({'error': 'No trainee IDs provided'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        try:
-            module = TrainingModule.objects.get(id=module_id)
-        except TrainingModule.DoesNotExist:
-            return Response({'error': 'Module not found'}, status=status.HTTP_404_NOT_FOUND)
-        
+            return Response({'error': 'No trainee IDs provided'}, status=400)
+        module = TrainingModule.objects(id=module_id).first()
+        if not module:
+            return Response({'error': 'Module not found'}, status=404)
         assigned = []
         errors = []
-        
         for trainee_id in trainee_ids:
-            try:
-                trainee = User.objects.get(id=trainee_id, role='trainee')
-                assignment, created = ModuleAssignment.objects.get_or_create(
-                    trainee=trainee, module=module,
-                    defaults={'assigned_by': request.user}
-                )
-                assigned.append(assignment.id)
-                print(f"Assigned trainee {trainee_id} to module {module_id}, created: {created}")
-            except User.DoesNotExist:
-                errors.append(f"Trainee with ID {trainee_id} not found")
+            trainee = User.objects(id=trainee_id, role='trainee').first()
+            if not trainee:
+                errors.append(f'Trainee with ID {trainee_id} not found')
                 continue
-        
+            assignment = ModuleAssignment.objects(trainee=trainee, module=module).first()
+            if not assignment:
+                assignment = ModuleAssignment(
+                    trainee=trainee,
+                    module=module,
+                    assigned_by=user,
+                    is_completed=False,
+                    assigned_at=datetime.utcnow()
+                )
+                assignment.save()
+            assigned.append(str(assignment.id))
         response_data = {
             'assigned': assigned,
             'total_requested': len(trainee_ids),
             'successfully_assigned': len(assigned)
         }
-        
         if errors:
             response_data['errors'] = errors
-        
-        print(f"Assignment response: {response_data}")
-        return Response(response_data, status=status.HTTP_201_CREATED) 
+        return Response(response_data, status=201)
 
 class TraineeDeleteView(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsInstructor]
+    permission_classes = [permissions.AllowAny]  # JWT-based
 
     def delete(self, request, trainee_id):
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
         try:
-            trainee = User.objects.get(id=trainee_id, role='trainee')
-            trainee.delete()
-            return Response({'message': 'Trainee deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
-        except User.DoesNotExist:
-            return Response({'error': 'Trainee not found.'}, status=status.HTTP_404_NOT_FOUND)
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+        trainee = User.objects(id=trainee_id, role='trainee').first()
+        if not trainee:
+            return Response({'error': 'Trainee not found.'}, status=404)
+        trainee.delete()
+        return Response({'message': 'Trainee deleted successfully.'}, status=204)
 
 class MessageInstructorView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]  # JWT-based
 
     def post(self, request):
-        # Only trainees can send messages to their instructor
-        if request.user.role != 'trainee':
-            return Response({'error': 'Only trainees can send messages.'}, status=status.HTTP_403_FORBIDDEN)
-        instructors = User.objects.filter(role='instructor')
-        if not instructors.exists():
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+
+        user = User.objects(id=payload['user_id']).first()
+        if not user:
+            return Response({'error': 'User not found'}, status=404)
+
+        instructors = User.objects(role='instructor')
+        if not instructors:
             return Response({'error': 'No instructor found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = MessageSerializer(data=request.data)
-        if serializer.is_valid():
-            for instructor in instructors:
-                Message.objects.create(
-                    sender=request.user,
-                    recipient=instructor,
-                    content=serializer.validated_data['content']
-                )
-            return Response({'message': 'Message sent to all instructors.'}, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        content = request.data.get('content')
+        if not content:
+            return Response({'error': 'Content is required.'}, status=400)
+        for instructor in instructors:
+            msg = Message(
+                sender=user,
+                recipient=instructor,
+                content=content
+            )
+            msg.save()
+        return Response({'message': 'Message sent to all instructors.'}, status=status.HTTP_201_CREATED)
 
 class InstructorMessagesView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]  # JWT-based
 
     def get(self, request):
-        if request.user.role != 'instructor':
-            return Response({'error': 'Only instructors can view messages.'}, status=403)
-        messages = Message.objects.filter(recipient=request.user).order_by('-timestamp')
-        serializer = MessageSerializer(messages, many=True)
-        return Response(serializer.data)
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+
+        user = User.objects(id=payload['user_id']).first()
+        if not user or user.role != 'instructor':
+            return Response({'error': 'User not found or not instructor'}, status=403)
+
+        messages = Message.objects(recipient=user).order_by('-timestamp')
+        # Convert ObjectId to str in the response
+        data = []
+        for msg in messages:
+            data.append({
+                'id': str(msg.id),
+                'sender': str(msg.sender.id),
+                'recipient': str(msg.recipient.id),
+                'content': msg.content,
+                'timestamp': msg.timestamp.isoformat() if msg.timestamp else None,
+            })
+        return Response(data)
 
 class InstructorReplyView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -436,11 +763,91 @@ class InstructorReplyView(APIView):
         return Response(MessageSerializer(reply).data, status=201)
 
 class TraineeMessagesView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]  # JWT-based
 
     def get(self, request):
-        if request.user.role != 'trainee':
-            return Response({'error': 'Only trainees can view their messages.'}, status=403)
-        messages = Message.objects.filter(recipient=request.user).order_by('-timestamp')
-        serializer = MessageSerializer(messages, many=True)
-        return Response(serializer.data) 
+        # Extract JWT from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization header missing'}, status=401)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token'}, status=401)
+
+        user = User.objects(id=payload['user_id']).first()
+        if not user:
+            return Response({'error': 'User not found'}, status=404)
+
+        # Use MongoEngine's __raw__ for OR queries
+        messages = Message.objects(__raw__={'$or': [{'sender': user.id}, {'recipient': user.id}]}).order_by('timestamp')
+        data = []
+        for msg in messages:
+            data.append({
+                'id': str(msg.id),
+                'sender': {
+                    'id': str(msg.sender.id),
+                    'username': msg.sender.username,
+                    'role': msg.sender.role,
+                },
+                'recipient': {
+                    'id': str(msg.recipient.id),
+                    'username': msg.recipient.username,
+                    'role': msg.recipient.role,
+                },
+                'content': msg.content,
+                'timestamp': msg.timestamp.isoformat() if msg.timestamp else None,
+            })
+        return Response(data)
+
+class SuperAdminDashboardView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsSuperAdmin]
+    def get(self, request):
+        trainee_count = User.objects.filter(role='trainee').count()
+        instructor_count = User.objects.filter(role='instructor').count()
+        return Response({
+            'trainee_count': trainee_count,
+            'instructor_count': instructor_count,
+        })
+
+class UserListView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsSuperAdmin]
+    def get(self, request):
+        users = User.objects.filter(role__in=['trainee', 'instructor'])
+        serializer = UserSerializer(users, many=True)
+        return Response(serializer.data)
+
+class UserCreateView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsSuperAdmin]
+    def post(self, request):
+        serializer = UserCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class UserUpdateView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsSuperAdmin]
+    def put(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id, role__in=['trainee', 'instructor'])
+        except User.DoesNotExist:
+            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = UserUpdateSerializer(user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(UserSerializer(user).data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class UserDeleteView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsSuperAdmin]
+    def delete(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id, role__in=['trainee', 'instructor'])
+            user.delete()
+            return Response({'message': 'User deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND) 

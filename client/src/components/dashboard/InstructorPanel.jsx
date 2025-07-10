@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import axiosInstance from '../../utils/axios';
 import { useNavigate } from 'react-router-dom';
@@ -13,9 +13,14 @@ function InstructorPanel() {
   const [error, setError] = useState('');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const navigate = useNavigate();
-  const [messages, setMessages] = useState([]);
-  const [replyText, setReplyText] = useState({});
-  const [replyStatus, setReplyStatus] = useState({});
+  // Chatbot state
+  const [chatOpen, setChatOpen] = useState(false);
+  const [message, setMessage] = useState('');
+  const [msgStatus, setMsgStatus] = useState('');
+  const [inbox, setInbox] = useState([]);
+  const [inboxLoading, setInboxLoading] = useState(true);
+  const [inboxError, setInboxError] = useState('');
+  const chatEndRef = useRef(null);
 
   const fetchInstructorStats = async () => {
     try {
@@ -34,20 +39,50 @@ function InstructorPanel() {
 
   useEffect(() => {
     fetchInstructorStats();
+    fetchInbox();
   }, []);
 
   useEffect(() => {
-    // Fetch messages for instructor inbox
-    const fetchMessages = async () => {
-      try {
-        const res = await axiosInstance.get('/messages/inbox/');
-        setMessages(res.data);
-      } catch (err) {
-        setMessages([]);
-      }
+    if (chatOpen && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatOpen, inbox]);
+
+  const fetchInbox = async () => {
+    setInboxLoading(true);
+    setInboxError('');
+    try {
+      const response = await axiosInstance.get('/messages/my/');
+      setInbox(response.data);
+    } catch (err) {
+      setInboxError('Failed to load messages');
+    } finally {
+      setInboxLoading(false);
+    }
+  };
+
+  const sendMessage = async (e) => {
+    e.preventDefault();
+    setMsgStatus('');
+    const tempMsg = {
+      id: `temp-${Date.now()}`,
+      content: message,
+      sender: { username: user.username },
+      timestamp: new Date().toISOString(),
     };
-    fetchMessages();
-  }, []);
+    setInbox(prev => [...prev, tempMsg]);
+    try {
+      await axiosInstance.post('/messages/send/', { content: message });
+      setMsgStatus('Message sent!');
+      setMessage('');
+      setTimeout(() => {
+        fetchInbox();
+      }, 1500);
+    } catch (err) {
+      setMsgStatus('Failed to send message.');
+      setInbox(prev => prev.filter(m => m.id !== tempMsg.id));
+    }
+  };
 
   const handleModuleCreated = (newModule) => {
     // When a module is created, refresh the stats to show the new count
@@ -58,21 +93,6 @@ function InstructorPanel() {
       text: `New module "${newModule.title}" created.`,
       time: 'Just now'
     }, ...prev]);
-  };
-
-  const handleReplyChange = (id, value) => {
-    setReplyText(prev => ({ ...prev, [id]: value }));
-  };
-
-  const sendReply = async (id) => {
-    setReplyStatus(prev => ({ ...prev, [id]: '' }));
-    try {
-      await axiosInstance.post(`/messages/${id}/reply/`, { content: replyText[id] });
-      setReplyStatus(prev => ({ ...prev, [id]: 'Reply sent!' }));
-      setReplyText(prev => ({ ...prev, [id]: '' }));
-    } catch (err) {
-      setReplyStatus(prev => ({ ...prev, [id]: 'Failed to send reply.' }));
-    }
   };
 
   if (loading) return <div className="loading-container"><div>Loading...</div></div>;
@@ -92,7 +112,6 @@ function InstructorPanel() {
           <h3 className="card-title">Quick Actions</h3>
           <div style={{ display: 'flex', gap: '16px' }}>
             <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
-              console.log('CREATE MODULE BUTTON CLICKED: Setting isCreateModalOpen to true.');
               setIsCreateModalOpen(true);
             }}>
               <FaPlus style={{ marginRight: '8px' }} /> Create Module
@@ -154,33 +173,138 @@ function InstructorPanel() {
           </div>
         </div>
 
-        <div style={{ background: '#20232a', borderRadius: 14, boxShadow: '0 4px 24px #0002', padding: '1.5rem', marginTop: 24 }}>
-          <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 18, marginBottom: 12 }}>Inbox</h3>
-          {messages.length === 0 ? (
-            <div style={{ color: '#b0b8c1' }}>No messages yet.</div>
-          ) : (
-            messages.map(msg => (
-              <div key={msg.id} style={{ marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid #23272f' }}>
-                <div style={{ color: '#fff', fontWeight: 600, fontSize: 16 }}>
-                  From: {msg.sender && msg.sender.username ? msg.sender.username : 'Trainee'}
-                  <span style={{ color: '#b0b8c1', fontWeight: 400, fontSize: 13, marginLeft: 8 }}>{new Date(msg.timestamp).toLocaleString()}</span>
-                </div>
-                <div style={{ color: '#e0e6ed', margin: '8px 0 12px 0' }}>{msg.content}</div>
-                <form onSubmit={e => { e.preventDefault(); sendReply(msg.id); }}>
-                  <textarea
-                    value={replyText[msg.id] || ''}
-                    onChange={e => handleReplyChange(msg.id, e.target.value)}
-                    placeholder="Type your reply..."
-                    style={{ width: '100%', minHeight: 40, borderRadius: 8, border: '1px solid #23272f', background: '#23272f', color: '#fff', marginBottom: 8, padding: 8 }}
-                    required
-                  />
-                  <button type="submit" className="btn btn-primary" style={{ marginTop: 4 }}>Reply</button>
-                  {replyStatus[msg.id] && <div style={{ marginTop: 6, color: replyStatus[msg.id] === 'Reply sent!' ? '#22c55e' : '#e74c3c' }}>{replyStatus[msg.id]}</div>}
-                </form>
-              </div>
-            ))
-          )}
+        {/* Floating Chat Icon */}
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 32,
+            right: 32,
+            zIndex: 1000,
+            background: '#23272f',
+            borderRadius: '50%',
+            width: 62,
+            height: 62,
+            boxShadow: '0 4px 24px #0004',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            border: '3px solid #eab308',
+          }}
+          onClick={() => setChatOpen(true)}
+          title="Chat with User"
+        >
+          <span style={{ fontSize: 32, color: '#eab308' }}>💬</span>
         </div>
+        {/* Chatbot Modal */}
+        {chatOpen && (
+          <div style={{
+            position: 'fixed',
+            bottom: 110,
+            right: 32,
+            width: 370,
+            maxWidth: '95vw',
+            height: 480,
+            background: '#20232a',
+            borderRadius: 18,
+            boxShadow: '0 8px 32px #0007',
+            zIndex: 1100,
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '16px 18px',
+              borderBottom: '1.5px solid #23272f',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: '#23272f',
+              borderTopLeftRadius: 18,
+              borderTopRightRadius: 18,
+            }}>
+              <span style={{ fontWeight: 700, color: '#fff', fontSize: 18 }}>User Chat</span>
+              <button
+                onClick={() => setChatOpen(false)}
+                style={{ background: 'none', border: 'none', color: '#eab308', fontSize: 22, cursor: 'pointer', fontWeight: 700 }}
+                title="Close Chat"
+              >×</button>
+            </div>
+            {/* Chat History */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '18px 14px 0 14px', background: '#20232a' }}>
+              {inboxLoading ? (
+                <div style={{ color: '#b0b8c1' }}>Loading messages...</div>
+              ) : inboxError ? (
+                <div style={{ color: '#e74c3c' }}>{inboxError}</div>
+              ) : inbox.length === 0 ? (
+                <div style={{ color: '#b0b8c1' }}>No messages yet. Start the conversation!</div>
+              ) : (
+                inbox.map(msg => {
+                  const isInstructor = msg.sender && msg.sender.username === user.username;
+                  return (
+                    <div
+                      key={msg.id}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: isInstructor ? 'flex-end' : 'flex-start',
+                        marginBottom: 18,
+                      }}
+                    >
+                      <div
+                        style={{
+                          background: isInstructor ? '#22c55e' : '#23272f',
+                          color: isInstructor ? '#fff' : '#eab308',
+                          borderRadius: 12,
+                          padding: '10px 16px',
+                          maxWidth: '80%',
+                          fontSize: 15,
+                          fontWeight: 500,
+                          boxShadow: '0 2px 8px #0002',
+                          position: 'relative',
+                        }}
+                      >
+                        {msg.content}
+                        <span style={{
+                          position: 'absolute',
+                          top: -18,
+                          right: isInstructor ? 0 : 'unset',
+                          left: isInstructor ? 'unset' : 0,
+                          color: isInstructor ? '#22c55e' : '#eab308',
+                          fontSize: 13,
+                          fontWeight: 700,
+                          background: 'transparent',
+                          padding: '0 4px',
+                        }}>
+                          {isInstructor ? 'You' : (msg.sender && msg.sender.username) || 'User'}
+                        </span>
+                      </div>
+                      <span style={{ color: '#b0b8c1', fontSize: 12, marginTop: 2 }}>
+                        {new Date(msg.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={chatEndRef} />
+            </div>
+            {/* Message Input */}
+            <form onSubmit={sendMessage} style={{ padding: '14px 16px', borderTop: '1.5px solid #23272f', background: '#23272f', borderBottomLeftRadius: 18, borderBottomRightRadius: 18 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type="text"
+                  value={message}
+                  onChange={e => setMessage(e.target.value)}
+                  placeholder="Type your message..."
+                  style={{ flex: 1, borderRadius: 8, border: '1px solid #23272f', background: '#181b20', color: '#fff', padding: '10px 12px', fontSize: 15 }}
+                  required
+                />
+                <button type="submit" className="btn btn-primary" style={{ borderRadius: 8, fontWeight: 600, fontSize: 15, padding: '10px 18px' }}>Send</button>
+              </div>
+              {msgStatus && <div style={{ marginTop: 8, color: msgStatus === 'Message sent!' ? '#22c55e' : '#e74c3c', fontSize: 14 }}>{msgStatus}</div>}
+            </form>
+          </div>
+        )}
       </div>
 
       <CreateModuleModal

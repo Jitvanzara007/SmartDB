@@ -1,18 +1,17 @@
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin
 from .models import User, TrainingModule, ModuleAssignment
 
 @admin.register(User)
-class CustomUserAdmin(UserAdmin):
+class CustomUserAdmin(admin.ModelAdmin):
     list_display = ('username', 'email', 'role', 'is_active', 'created_at')
     list_filter = ('role', 'is_active', 'created_at')
     search_fields = ('username', 'email')
     ordering = ('-created_at',)
     
-    fieldsets = UserAdmin.fieldsets + (
+    fieldsets = (
         ('Additional Info', {'fields': ('role',)}),
     )
-    add_fieldsets = UserAdmin.add_fieldsets + (
+    add_fieldsets = (
         ('Additional Info', {'fields': ('role',)}),
     )
 

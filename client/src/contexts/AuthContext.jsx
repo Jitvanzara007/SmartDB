@@ -1,6 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
+// Always set the Authorization header from localStorage on app load
+const token = localStorage.getItem('access_token');
+if (token) {
+  axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+}
+
 const AuthContext = createContext();
 
 export function useAuth() {

@@ -401,3 +401,58 @@
     padding: 8px;
     margin-bottom: 12px;
 }
+
+
+/* Responsive styles for Login page (auth) */
+
+@media (max-width: 900px) {
+    .auth-container {
+        padding: 1.5rem 0.5rem;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .auth-card {
+        width: 100%;
+        max-width: 400px;
+        min-width: 0;
+        margin: 0 auto;
+        border-radius: 12px;
+        box-shadow: 0 2px 12px #0002;
+        padding: 2rem 1.2rem;
+    }
+    .card-body {
+        padding: 0;
+    }
+}
+
+@media (max-width: 600px) {
+    .auth-container {
+        padding: 0.5rem 0.2rem;
+    }
+    .auth-card {
+        max-width: 98vw;
+        padding: 1.2rem 0.5rem;
+        border-radius: 8px;
+    }
+    .auth-title {
+        font-size: 1.5rem;
+    }
+    .auth-subtitle {
+        font-size: 1rem;
+    }
+    .form-group input,
+    .form-group label {
+        font-size: 1rem;
+    }
+    .btn {
+        width: 100%;
+        font-size: 1rem;
+        padding: 0.7rem 0;
+    }
+    .auth-footer {
+        font-size: 0.95rem;
+        margin-top: 1.2rem;
+    }
+}

@@ -1,63 +1,37 @@
-from django.db import models
-from django.contrib.auth.models import AbstractUser
-from django.utils import timezone
+import mongoengine as me
+import datetime
 
-class User(AbstractUser):
-    ROLE_CHOICES = [
-        ('instructor', 'Instructor'),
-        ('trainee', 'Trainee'),
-    ]
-    
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='trainee')
-    email = models.EmailField(unique=True)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+class User(me.Document):
+    username = me.StringField(required=True, unique=True)
+    email = me.EmailField(required=True, unique=True)
+    password = me.StringField(required=True)
+    role = me.StringField(choices=("instructor", "trainee"), default="trainee")
+    is_active = me.BooleanField(default=True)
+    first_name = me.StringField()
+    last_name = me.StringField()
+    created_at = me.DateTimeField(default=datetime.datetime.utcnow)
+    updated_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
-    class Meta:
-        db_table = 'users'
+class TrainingModule(me.Document):
+    title = me.StringField(required=True, max_length=200)
+    description = me.StringField()
+    content = me.StringField()
+    duration_minutes = me.IntField(default=0)
+    created_by = me.ReferenceField(User, required=True)
+    is_active = me.BooleanField(default=True)
+    created_at = me.DateTimeField(default=datetime.datetime.utcnow)
+    updated_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
-class TrainingModule(models.Model):
-    title = models.CharField(max_length=200)
-    description = models.TextField()
-    content = models.TextField()
-    duration_minutes = models.IntegerField(default=0)
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_modules')
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+class ModuleAssignment(me.Document):
+    trainee = me.ReferenceField(User, required=True)
+    module = me.ReferenceField(TrainingModule, required=True)
+    assigned_by = me.ReferenceField(User, required=True)
+    is_completed = me.BooleanField(default=False)
+    completed_at = me.DateTimeField()
+    assigned_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
-    class Meta:
-        db_table = 'training_modules'
-
-    def __str__(self):
-        return self.title
-
-class ModuleAssignment(models.Model):
-    trainee = models.ForeignKey(User, on_delete=models.CASCADE, related_name='assigned_modules')
-    module = models.ForeignKey(TrainingModule, on_delete=models.CASCADE, related_name='assignments')
-    assigned_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='assignments_made')
-    is_completed = models.BooleanField(default=False)
-    completed_at = models.DateTimeField(null=True, blank=True)
-    assigned_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = 'module_assignments'
-        unique_together = ['trainee', 'module']
-
-    def __str__(self):
-        return f"{self.trainee.username} - {self.module.title}"
-
-    def mark_completed(self):
-        self.is_completed = True
-        self.completed_at = timezone.now()
-        self.save()
-
-class Message(models.Model):
-    sender = models.ForeignKey(User, related_name='sent_messages', on_delete=models.CASCADE)
-    recipient = models.ForeignKey(User, related_name='received_messages', on_delete=models.CASCADE)
-    content = models.TextField()
-    timestamp = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"From {self.sender.username} to {self.recipient.username}: {self.content[:30]}" 
+class Message(me.Document):
+    sender = me.ReferenceField(User, required=True)
+    recipient = me.ReferenceField(User, required=True)
+    content = me.StringField()
+    timestamp = me.DateTimeField(default=datetime.datetime.utcnow) 
