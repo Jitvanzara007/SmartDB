@@ -10,3 +10,4 @@ setuptools
 gunicorn
 pymongo==3.12.3
 passlib
+dnspython
