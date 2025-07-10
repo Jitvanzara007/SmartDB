@@ -85,6 +85,11 @@ import os
 MONGODB_URI = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/SmartDB')
 connect(host=MONGODB_URI)
 
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.dummy'
+    }
+}
 # Custom User Model
 # AUTH_USER_MODEL = 'training.User'
 
