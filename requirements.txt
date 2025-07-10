@@ -9,3 +9,4 @@ mongoengine==0.27.0
 setuptools 
 gunicorn
 pymongo==3.12.3
+passlib
