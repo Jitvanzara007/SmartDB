@@ -80,12 +80,12 @@ class LoginSerializer(serializers.Serializer):
         username = attrs.get('username')
         password = attrs.get('password')
         user = User.objects(username=username).first()
-            if not user:
+        if not user:
             raise serializers.ValidationError('Invalid credentials')
         if not pbkdf2_sha256.verify(password, user.password):
-                raise serializers.ValidationError('Invalid credentials')
-            if not user.is_active:
-                raise serializers.ValidationError('User account is disabled')
+            raise serializers.ValidationError('Invalid credentials')
+        if not user.is_active:
+            raise serializers.ValidationError('User account is disabled')
         attrs['user'] = user
         return attrs
 
