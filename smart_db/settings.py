@@ -80,6 +80,7 @@ WSGI_APPLICATION = 'smart_db.wsgi.application'
 
 # Add MongoEngine connection
 from mongoengine import connect
+import os
 
 MONGODB_URI = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/SmartDB')
 connect(host=MONGODB_URI)
