@@ -81,14 +81,8 @@ WSGI_APPLICATION = 'smart_db.wsgi.application'
 # Add MongoEngine connection
 from mongoengine import connect
 
-MONGODB_NAME = "SmartDB"
-connect(
-    db=MONGODB_NAME,
-    host="localhost",
-    port=27017,
-    # username="your_username",  # if needed
-    # password="your_password",  # if needed
-)
+MONGODB_URI = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/SmartDB')
+connect(host=MONGODB_URI)
 
 # Custom User Model
 # AUTH_USER_MODEL = 'training.User'
