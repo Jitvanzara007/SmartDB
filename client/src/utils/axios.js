@@ -6,7 +6,7 @@ const API_BASE_URL =
 
 // Create axios instance with base URL
 const axiosInstance = axios.create({
-    baseURL: "https://jitvanzara007.pythonanywhere.com/api/",
+    baseURL: `${API_BASE_URL}/api/`,
     timeout: 10000,
     headers: {
         'Content-Type': 'application/json',
@@ -42,8 +42,8 @@ axiosInstance.interceptors.response.use(
                     throw new Error('No refresh token available');
                 }
 
-                // Try to refresh the token
-                const response = await axios.post(`${API_BASE_URL}/api/auth/token/refresh/`, {
+                // Try to refresh the token using the same axiosInstance
+                const response = await axiosInstance.post('auth/token/refresh/', {
                     refresh: refreshToken
                 });
 
@@ -52,7 +52,7 @@ axiosInstance.interceptors.response.use(
 
                 // Update the original request with new token
                 originalRequest.headers.Authorization = `Bearer ${access}`;
-                return axios(originalRequest);
+                return axiosInstance(originalRequest);
             } catch (refreshError) {
                 // If refresh fails, clear storage and redirect to login
                 localStorage.removeItem('access_token');
