@@ -26,7 +26,18 @@ SECRET_KEY = 'django-insecure-zqqgp^l64acn57xwktgbb0qac&-vynt+&e-(=h4-rs8kwt$6)6
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    'smart-db-omega.vercel.app',
+    '.vercel.app',
+    '.render.com',
+    '.railway.app',
+    '.fly.dev',
+    'jitvanzara007.pythonanywhere.com',
+    '127.0.0.1',
+    'localhost'
+]
 
 
 # Application definition
@@ -108,8 +119,38 @@ REST_FRAMEWORK = {
 }
 
 # CORS Settings
-CORS_ALLOW_ALL_ORIGINS = True  # Only for development
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    
+    "https://smart-db-omega.vercel.app",
+    "https://smart-db-omega-git-main.vercel.app",
+    "https://smart-db-omega-git-master.vercel.app",
+    "https://smart-db-git-main-jitvanzara007s-projects.vercel.app/",
+]
+
 CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
 
 
 # Internationalization

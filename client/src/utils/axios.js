@@ -1,8 +1,12 @@
 import axios from 'axios';
 
+// Get API base URL from environment variable
+const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
 // Create axios instance with base URL
 const axiosInstance = axios.create({
-    baseURL: '/api',
+    baseURL: "https://jitvanzara007.pythonanywhere.com/api/",
     timeout: 10000,
     headers: {
         'Content-Type': 'application/json',
@@ -39,7 +43,7 @@ axiosInstance.interceptors.response.use(
                 }
 
                 // Try to refresh the token
-                const response = await axios.post('/api/auth/token/refresh/', {
+                const response = await axios.post(`${API_BASE_URL}/api/auth/token/refresh/`, {
                     refresh: refreshToken
                 });
 
