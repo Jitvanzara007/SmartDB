@@ -1,11 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import axios from 'axios';
-
-// Always set the Authorization header from localStorage on app load
-const token = localStorage.getItem('access_token');
-if (token) {
-  axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-}
+import axiosInstance from '../utils/axios';
 
 const AuthContext = createContext();
 
@@ -21,15 +15,13 @@ export function AuthProvider({ children }) {
   // Validate token on app startup
   const validateToken = async (token) => {
     try {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      const response = await axios.get('/api/user/profile/');
+      const response = await axiosInstance.get('user/profile/');
       return response.data;
     } catch (error) {
       // Token is invalid, clear it
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
       localStorage.removeItem('user');
-      delete axios.defaults.headers.common['Authorization'];
       return null;
     }
   };
@@ -65,7 +57,7 @@ export function AuthProvider({ children }) {
 
   const login = async (username, password) => {
     try {
-      const response = await axios.post('/api/auth/login/', {
+      const response = await axiosInstance.post('auth/login/', {
         username,
         password
       });
@@ -78,7 +70,6 @@ export function AuthProvider({ children }) {
       
       setUser(userData);
       setIsAuthenticated(true);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${access}`;
       
       return { success: true };
     } catch (error) {
@@ -91,7 +82,7 @@ export function AuthProvider({ children }) {
 
   const register = async (userData) => {
     try {
-      const response = await axios.post('/api/auth/register/', userData);
+      const response = await axiosInstance.post('auth/register/', userData);
       
       const { access, refresh, user: newUser } = response.data;
       
@@ -110,7 +101,7 @@ export function AuthProvider({ children }) {
     try {
       const refresh = localStorage.getItem('refresh_token');
       if (refresh) {
-        await axios.post('/api/auth/logout/', { refresh });
+        await axiosInstance.post('auth/logout/', { refresh });
       }
     } catch (error) {
       console.error('Logout error:', error);
@@ -120,13 +111,12 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('user');
       setUser(null);
       setIsAuthenticated(false);
-      delete axios.defaults.headers.common['Authorization'];
     }
   };
 
   const updateProfile = async (profileData) => {
     try {
-      const response = await axios.put('/api/user/profile/', profileData);
+      const response = await axiosInstance.put('user/profile/', profileData);
       const updatedUser = response.data;
       
       setUser(updatedUser);
@@ -143,7 +133,7 @@ export function AuthProvider({ children }) {
 
   const changePassword = async (oldPassword, newPassword) => {
     try {
-      await axios.post('/api/user/change-password/', {
+      await axiosInstance.post('user/change-password/', {
         old_password: oldPassword,
         new_password: newPassword
       });

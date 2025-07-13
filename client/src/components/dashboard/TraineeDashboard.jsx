@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import axios from 'axios';
 import axiosInstance from '../../utils/axios';
 import { CircularProgressbarWithChildren, buildStyles } from 'react-circular-progressbar';
 import 'react-circular-progressbar/dist/styles.css';
@@ -42,7 +41,7 @@ function TraineeDashboard() {
 
   const fetchDashboardData = async () => {
     try {
-      const response = await axios.get('/api/dashboard/trainee/');
+      const response = await axiosInstance.get('dashboard/trainee/');
       setDashboardData(response.data);
     } catch (err) {
       setError('Failed to load dashboard data');
@@ -81,7 +80,7 @@ function TraineeDashboard() {
 
   const markModuleCompleted = async (assignmentId) => {
     try {
-      await axios.post(`/api/trainee/complete/${assignmentId}/`);
+      await axiosInstance.post(`trainee/complete/${assignmentId}/`);
       fetchDashboardData(); // Refresh data
     } catch (err) {
       setError('Failed to mark module as completed');

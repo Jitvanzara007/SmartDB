@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import axios from 'axios';
+import axiosInstance from '../../utils/axios';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -35,7 +35,7 @@ function InstructorDashboard() {
 
   const fetchDashboardData = async () => {
     try {
-      const response = await axios.get('/api/dashboard/instructor/');
+      const response = await axiosInstance.get('dashboard/instructor/');
       setDashboardData(response.data);
     } catch (err) {
       setError('Failed to load dashboard data');

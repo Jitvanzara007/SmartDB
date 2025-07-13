@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import axios from 'axios';
+import axiosInstance from '../../utils/axios';
 import { useNavigate } from 'react-router-dom';
 
 function TraineeModules() {
@@ -21,7 +21,7 @@ function TraineeModules() {
 
   const fetchModules = async () => {
     try {
-      const response = await axios.get('/api/trainee/modules/');
+      const response = await axiosInstance.get('trainee/modules/');
       setModules(response.data);
     } catch (err) {
       setError('Failed to load modules');
@@ -33,7 +33,7 @@ function TraineeModules() {
 
   const markModuleCompleted = async (assignmentId) => {
     try {
-      await axios.post(`/api/trainee/complete/${assignmentId}/`);
+      await axiosInstance.post(`trainee/complete/${assignmentId}/`);
       fetchModules(); // Refresh data
     } catch (err) {
       setError('Failed to mark module as completed');
